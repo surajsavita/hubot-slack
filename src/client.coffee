@@ -1,6 +1,7 @@
 _                      = require "lodash"
 Promise                = require "bluebird"
-{RtmClient, WebClient} = require "@slack/client"
+{WebClient}            = require "@slack/web-api"
+{RTMClient}            = require "@slack/rtm-api"
 SlackFormatter         = require "./formatter"
 
 class SlackClient
@@ -35,7 +36,9 @@ class SlackClient
     # NOTE: the recommended initialization options are `{ dataStore: false, useRtmConnect: true }`. However the
     # @rtm.dataStore property is publically accessible, so the recommended settings cannot be used without breaking
     # this object's API. The property is no longer used internally.
-    @rtm = new RtmClient options.token, options.rtm
+    console.log("Options: ", options)
+
+    @rtm = new RTMClient options.token, options.rtm
     @web = new WebClient options.token, { maxRequestConcurrency: 1 }
     
     @apiPageSize = 100
@@ -126,11 +129,11 @@ class SlackClient
     # NOTE: There's a performance cost to making this request, which can be avoided if instead the attempt to set the
     # topic is made regardless of the conversation type. If the conversation type is not compatible, the call would
     # fail, which is exactly the outcome in this implementation.
-    @web.conversations.info(conversationId)
+    @web.conversations.info({channel:conversationId})
       .then (res) =>
         conversation = res.channel
         if !conversation.is_im && !conversation.is_mpim
-          return @web.conversations.setTopic(conversationId, topic)
+          return @web.conversations.setTopic({channel:conversationId, topic})
         else
           @robot.logger.debug "Conversation #{conversationId} is a DM or MPDM. " +
                               "These conversation types do not have topics."
@@ -191,13 +194,14 @@ class SlackClient
       thread_ts: envelope.message?.thread_ts
 
     if typeof message isnt "string"
-      @web.chat.postMessage(room, message.text, _.defaults(message, options))
-        .catch (error) =>
-          @robot.logger.error "SlackClient#send() error: #{error.message}"
+      text = message.text
+      options = _.defaults(message, options)
     else
-      @web.chat.postMessage(room, message, options)
-        .catch (error) =>
-          @robot.logger.error "SlackClient#send() error: #{error.message}"
+      text = message
+    @web.chat.postMessage(_.defaults({channel: room, text}, options))
+      .catch (error) =>
+        @robot.logger.error "SlackClient#send() error: #{error.message}"
+
 
   ###*
   # Fetch users from Slack API using pagination
@@ -234,7 +238,7 @@ class SlackClient
 
     # User is not in brain - call users.info
     # The user will be added to the brain in EventHandler
-    @web.users.info(userId).then((r) => @updateUserInBrain(r.user))
+    @web.users.info({user: userId}).then((r) => @updateUserInBrain(r.user))
 
   ###*
   # Fetch bot user info from the bot -> user map
@@ -263,7 +267,7 @@ class SlackClient
     delete @channelData[conversationId] if @channelData[conversationId]?
 
     # Return conversations.info promise
-    @web.conversations.info(conversationId).then((r) =>
+    @web.conversations.info({channel:conversationId}).then((r) =>
       if r.channel?
         @channelData[conversationId] = {
           channel: r.channel,
@@ -361,7 +365,7 @@ class SlackClient
             # these messages only have a user_id property if sent from a bot user (xoxb token). therefore
             # the above assignment will not happen for all messages from custom integrations or apps without a bot user
             else if fetched.bot.user_id?
-              return @web.users.info(fetched.bot.user_id).then((res) =>
+              return @web.users.info({ user: fetched.bot.user_id}).then((res) =>
                 event.user = res.user
                 @botUserIdMap[event.bot_id] = res.user
                 return event
@@ -372,7 +376,6 @@ class SlackClient
               event.user = {}
           else
             event.user = {}
-
           return event
         # once the event is fully populated...
         .then (fetchedEvent) =>

@@ -38,7 +38,8 @@ class SlackBot extends Adapter
     return @robot.logger.error "Invalid token provided, please follow the upgrade instructions" unless (@options.token.substring(0, 5) in ["xoxb-", "xoxp-"])
 
     # SlackClient event handlers
-    @client.rtm.on "open", @open
+    @client.rtm.on "connecting", @connecting
+    @client.rtm.on "connected", @open
     @client.rtm.on "close", @close
     @client.rtm.on "disconnect", @disconnect
     @client.rtm.on "error", @error
@@ -134,6 +135,11 @@ class SlackBot extends Adapter
   ###
   # SlackClient event handlers
   ###
+  connecting: =>
+    @robot.logger.info "Connecting to Slack RTM"
+
+    # Tell Hubot we're connected so it can load scripts
+    @emit "connecting"
 
   ###*
   # Slack client has opened the connection
